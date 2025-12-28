@@ -1,0 +1,22 @@
+= llits
+Luis Garcia
+:compat-mode:
+:toc:
+:icons: font
+:toc-title: Index
+:toclevels: 3
+:doctype: article
+:experimental:
+:icons: font
+:sectanchors:
+:sectlinks:
+:sectnums:
+:imagesdir: ./images
+
+== TRUMan (Trusted Resources Usage Manager)
+
+'TRUMan' is basically a reverse proxy (currently based on nginx) that provides a single access point to any service offered locally by the host.
+The proxy handles https requests to port 8443 on localhost. The service certificate is signed by a local CA configured to be self trusted.
+'TRUMan' also provides necessary CORS (cross origin resource sharing) headers to avoid problems related to both CORS policies and untrusted self-signed certificates.
+In addition to the proxy functionality, it also provides the ability to generate certificates signed by the local CA of the host.
+Although it was initially designed to simplify access to n4d, 'TRUMan' is easily expandable to support any other http service.

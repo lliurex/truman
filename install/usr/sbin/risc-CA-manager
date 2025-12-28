@@ -1,0 +1,205 @@
+#!/bin/sh
+
+CA_PATH="/etc/ssl/risc-CA"
+CA_KEY="$CA_PATH/private/cakey.pem"
+CA_CERT="$CA_PATH/cacert.pem"
+CA_CRT="/usr/local/share/ca-certificates/risc-CA.crt"
+CA_CONFIG="/usr/share/risc/risc-CA.cnf"
+CA_SERIAL_DB="$CA_PATH/serial"
+CA_INDEX_DB="$CA_PATH/index.txt"
+
+CA_SUBDIRS="private csr certs newcerts"
+
+die(){
+	MSG_TYPE="$1:"
+	shift
+	while [ "$1" ] ; do
+		echo "$MSG_TYPE $1" >&2
+		MSG_TYPE="$(echo "$MSG_TYPE"|sed -e "s%.% %g")"
+		shift
+	done
+	exit 1
+}
+
+usage(){
+	die "Usage" "$(basename "$0") [ --force ] {CA-init|CA-remove}" \
+	"$(basename "$0") [ --force ] {csr-gen|csr-sign|cert-gen} DOMAIN"
+}
+
+CA_test(){
+	for f in "$CA_KEY"  "$CA_CERT" "$CA_SERIAL_DB" ; do
+		[ -s "$f" ] || return 1
+	done
+	[ -e "$CA_INDEX_DB" ] || return 1
+
+	for d in $CA_SUBDIRS ; do
+		[ -d "$CA_PATH/$d" ] || return 1
+	done
+
+	return 0
+}
+
+CA_mkdirs(){
+	for d in $CA_SUBDIRS ; do
+		mkdir -p "$CA_PATH/$d"
+	done
+}
+
+CA_destroy(){
+	rm -fr "$CA_PATH"
+}
+
+CA_create(){
+	CA_mkdirs
+	# generate key
+	openssl genrsa -out $CA_KEY 2048
+	# generate CA root certificate
+	openssl req -new -x509 -sha256  -config $CA_CONFIG -key $CA_KEY -out $CA_CERT -subj "/C=ES/ST=Comunidad Valenciana/L=Valencia/O=LliureX/CN=LliureX"
+	# initialize serial database
+	echo 01 > "$CA_SERIAL_DB"
+	touch "$CA_INDEX_DB"
+}
+
+domain_get_ip(){
+	resolvectl -4 --legend=no query "$1" 2>/dev/null |cut -f 2 -d ":" |sed -e "s%\s%%g;s%--.*$%%"
+	return 0
+}
+
+domain_keyfile(){
+	echo "$CA_PATH/private/$1.key"
+}
+
+domain_extfile(){
+	echo "$CA_PATH/csr/${1}-extfile.cnf"
+}
+
+domain_csrfile(){
+	echo "$CA_PATH/csr/$1.csr"
+}
+
+domain_certfile(){
+	echo "$CA_PATH/certs/$1.crt"
+}
+
+csr_sign_test(){
+	[ -s "$(domain_certfile "$1")" ] || return 1
+	return 0
+}
+
+csr_test(){
+	for f in "$(domain_csrfile "$1")" "$(domain_keyfile "$1")" "$(domain_extfile "$1")" ; do
+		[ -s "$f" ] || return 1
+	done
+	return 0
+}
+
+csr_gen(){
+	DOMAIN="$1"
+	DOMAIN_KEY="$(domain_keyfile "$DOMAIN")"
+	DOMAIN_CSR="$(domain_csrfile "$DOMAIN")"
+	DOMAIN_EXT="$(domain_extfile "$DOMAIN")"
+	# private key for domain
+	openssl genrsa -out $DOMAIN_KEY 2048
+	openssl req -new -config $CA_CONFIG -key $DOMAIN_KEY -out $DOMAIN_CSR -subj "/C=ES/ST=Comunidad Valenciana/L=Valencia/O=LliureX/CN=$DOMAIN"
+
+	SUBJECT_ALT_NAME="DNS:$DOMAIN"
+	DOMAIN_IP="$(domain_get_ip "$DOMAIN")"
+	if [ "$IP" ] ; then
+		SUBJECT_ALT_NAME="$SUBJECT_ALT_NAME,IP:$DOMAIN_IP"
+	fi
+
+	# Create the extension file
+	echo "subjectAltName=${SUBJECT_ALT_NAME}" > "$DOMAIN_EXT"
+	echo "extendedKeyUsage = serverAuth" >> "$DOMAIN_EXT"
+}
+
+
+csr_sign(){
+	DOMAIN="$1"
+	DOMAIN_KEY="$CA_PATH/private/$DOMAIN.key"
+	DOMAIN_CSR="$CA_PATH/csr/$DOMAIN.csr"
+	DOMAIN_EXT="$(domain_extfile "$DOMAIN")"
+	DOMAIN_CERT="$CA_PATH/certs/$DOMAIN.crt"
+	rm -f $DOMAIN_CERT
+	# yes |openssl ca -config $CA_CONFIG -in $DOMAIN_CSR -out $DOMAIN_CERT -extfile "$DOMAIN_EXT"
+	# alternative, no update database
+	 openssl x509 -req -in $DOMAIN_CSR -extfile $DOMAIN_EXT -CA $CA_CERT -CAkey $CA_KEY -CAcreateserial -out $DOMAIN_CERT
+	# NOTA: para generar el serials usa /etc/ssl/risc-CA/cacert.srl y lo va incrementando (no almacenando)
+
+}
+
+trust_CA_certificate(){
+	cp  "$CA_CERT" "$CA_CRT"
+	update-ca-certificates
+}
+
+untrust_CA_certificate(){
+	rm -f "$CA_CRT"
+	update-ca-certificates
+}
+
+
+## main
+
+FORCE=""
+if [ "$1" = "--force" ] ; then
+	FORCE="Y"
+	shift
+fi
+
+[ "$1" ] || usage
+
+ACTION="$1"
+
+case "$ACTION" in
+	CA-init)
+		if [ "$FORCE" ] || ! CA_test ; then
+			CA_create
+			trust_CA_certificate
+		else
+			die "Error" "CA already exists"
+		fi
+		;;
+	CA-remove)
+		if [ "$FORCE" ] ; then
+			CA_destroy
+			untrust_CA_certificate
+		else
+			die "Error" "Use --force to remove CA files"
+		fi
+		;;
+	csr-gen)
+		CA_test || die "Error" "CA is not initialiced"
+		DOMAIN="$2"
+		[ "$DOMAIN" ] || usage
+		if [ "$FORCE" ] || ! csr_test "$DOMAIN" ; then
+			csr_gen "$DOMAIN"
+		else
+			die "Error" "CSR for domain '$DOMAIN' is already created"
+		fi
+		;;
+	csr-sign)
+		CA_test || die "Error" "CA is not initialiced"
+		DOMAIN="$2"
+		[ "$DOMAIN" ] || usage
+		csr_test "$DOMAIN" || die "Error" "CSR for domain '$DOMAIN' is not created"
+		if [ "$FORCE" ] || ! csr_sign_test "$DOMAIN" ; then
+			csr_sign "$DOMAIN"
+		else
+			die "Error" "certificate file for domain '$DOMAIN' is already created"
+		fi
+		;;
+	cert-gen)
+		CA_test || die "Error" "CA is not initialiced"
+		DOMAIN="$2"
+		[ "$DOMAIN" ] || usage
+		csr_test "$DOMAIN" || csr_gen "$DOMAIN"
+		csr_sign_test "$DOMAIN" || csr_sign "$DOMAIN"
+		;;
+	*)
+		usage
+		;;
+esac
+
+exit 0
+	

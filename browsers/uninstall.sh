@@ -1,0 +1,6 @@
+certutil -D -d sql:/home/lgarciag/.pki/nssdb -n "SocketAutoFirma" 
+certutil -D -d sql:/home/lliurex/.pki/nssdb -n "SocketAutoFirma" 
+certutil -D -d /home/lgarciag/.mozilla/firefox/r7cvcscj.default -n "SocketAutoFirma" 
+certutil -D -d sql:/home/lgarciag/.mozilla/firefox/ef7fbv47.default-release -n "SocketAutoFirma" 
+certutil -D -d /home/lliurex/.mozilla/firefox/y68stvq8.default -n "SocketAutoFirma" 
+certutil -D -d sql:/home/lliurex/.mozilla/firefox/dzb5zli8.default-release -n "SocketAutoFirma" 
