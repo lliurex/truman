@@ -1,15 +1,5 @@
 #!/bin/sh
 
-CA_PATH="/etc/ssl/risc-CA"
-CA_KEY="$CA_PATH/private/cakey.pem"
-CA_CERT="$CA_PATH/cacert.pem"
-CA_CRT="/usr/local/share/ca-certificates/risc-CA.crt"
-CA_CONFIG="/usr/share/risc/risc-CA.cnf"
-CA_SERIAL_DB="$CA_PATH/serial"
-CA_INDEX_DB="$CA_PATH/index.txt"
-
-CA_SUBDIRS="private csr certs newcerts"
-
 die(){
 	MSG_TYPE="$1:"
 	shift
@@ -22,12 +12,13 @@ die(){
 }
 
 usage(){
-	die "Usage" "$(basename "$0") [ --force ] {CA-init|CA-remove}" \
-	"$(basename "$0") [ --force ] {csr-gen|csr-sign|cert-gen} DOMAIN"
+	die "Usage" "$(basename "$0") [options] {CA-init|CA-remove}" \
+	"$(basename "$0") [options] {csr-gen|csr-sign|cert-gen} DOMAIN" \
+	" " "Options: --force | [--ca CA_NAME"
 }
 
 CA_test(){
-	for f in "$CA_KEY"  "$CA_CERT" "$CA_SERIAL_DB" ; do
+	for f in "$CA_KEY"  "$CA_CERT" ; do
 		[ -s "$f" ] || return 1
 	done
 	[ -e "$CA_INDEX_DB" ] || return 1
@@ -54,10 +45,10 @@ CA_create(){
 	# generate key
 	openssl genrsa -out $CA_KEY 2048
 	# generate CA root certificate
-	openssl req -new -x509 -sha256  -config $CA_CONFIG -key $CA_KEY -out $CA_CERT -subj "/C=ES/ST=Comunidad Valenciana/L=Valencia/O=LliureX/CN=LliureX"
+	openssl req -new -x509 -sha256  -config $CA_CONFIG -key $CA_KEY -out $CA_CERT -subj "/C=local/ST=localdomain/L=localhost/O=${CA_BASE_NAME}/CN=${CA_NAME}"
 	# initialize serial database
-	echo 01 > "$CA_SERIAL_DB"
-	touch "$CA_INDEX_DB"
+	#echo 01 > "$CA_SERIAL_DB"
+	#touch "$CA_INDEX_DB"
 }
 
 domain_get_ip(){
@@ -104,7 +95,7 @@ csr_gen(){
 
 	SUBJECT_ALT_NAME="DNS:$DOMAIN"
 	DOMAIN_IP="$(domain_get_ip "$DOMAIN")"
-	if [ "$IP" ] ; then
+	if [ "$DOMAIN_IP" ] ; then
 		SUBJECT_ALT_NAME="$SUBJECT_ALT_NAME,IP:$DOMAIN_IP"
 	fi
 
@@ -116,8 +107,8 @@ csr_gen(){
 
 csr_sign(){
 	DOMAIN="$1"
-	DOMAIN_KEY="$CA_PATH/private/$DOMAIN.key"
-	DOMAIN_CSR="$CA_PATH/csr/$DOMAIN.csr"
+	DOMAIN_KEY="$(domain_keyfile "$DOMAIN")"
+	DOMAIN_CSR="$(domain_csrfile "$DOMAIN")"
 	DOMAIN_EXT="$(domain_extfile "$DOMAIN")"
 	DOMAIN_CERT="$CA_PATH/certs/$DOMAIN.crt"
 	rm -f $DOMAIN_CERT
@@ -142,14 +133,41 @@ untrust_CA_certificate(){
 ## main
 
 FORCE=""
-if [ "$1" = "--force" ] ; then
-	FORCE="Y"
+CA_BASE_NAME="truman"
+
+while echo "x$1" |grep -q "^x--" ; do
+	case "$1" in
+		--force)
+			FORCE="Y"
+			;;
+		--ca)
+			shift
+			[ "$1" ] || usage
+			CA_BASENAME="$1"
+			;;
+	
+	esac
 	shift
-fi
+done
 
 [ "$1" ] || usage
 
+CA_NAME="${CA_BASE_NAME}-CA"
+CA_BASE_DIR="/etc/ssl/truman"
+CA_PATH="$CA_BASE_DIR/$CA_NAME"
+CA_KEY="$CA_PATH/CA-files/cakey.pem"
+CA_CERT="$CA_PATH/CA-files/cacert.pem"
+CA_CRT="/usr/local/share/ca-certificates/truman/${CA_NAME}.crt"
+CA_CONFIG="/usr/share/truman/${CA_NAME}.cnf"
+#CA_SERIAL_DB="$CA_PATH/serial"
+#CA_INDEX_DB="$CA_PATH/index.txt"
+
+CA_SUBDIRS="private csr certs"
+
+
 ACTION="$1"
+
+echo "Using CA: $CA_NAME"
 
 case "$ACTION" in
 	CA-init)
